@@ -9,14 +9,15 @@ preferences {
 	input("trace", "bool", title: "trace", description:
 		"Set it to true to enable tracing or leave it empty (no tracing)")
 	input("logFilter", "number",title: "(1=ERROR only,2=<1+WARNING>,3=<2+INFO>,4=<3+DEBUG>,5=<4+TRACE>)",  range: "1..5",
- 		description: "optional" )        
+ 		description: "optional" )
+    input("capacity","number",title: "Baseboard Watts", description:"Baseboard capacity")
 } 
 
 metadata {
 	// Automatically generated. Make future change here.
 
 
-	definition(name: "TH1123ZB-TH1124ZB Sinope Thermostat", namespace: "Sinope Technologies", author: "Rejean Bouchard/Yves Racine") {
+	definition(name: "TH1123ZB-TH1124ZB Sinope Thermostat v11", namespace: "Sinope Technologies", author: "Rejean Bouchard/Yves Racine/Mathieu Rousseau") {
 		capability "thermostatHeatingSetpoint"
 		capability "thermostatMode"
 		capability "thermostatOperatingState"        
@@ -27,6 +28,7 @@ metadata {
 		capability "Configuration"
 		capability "Refresh"
 		capability "Sensor"
+        capability "Power Meter"
 
 		attribute "temperatureDisplayMode", "enum", ["Deg_C", "Deg_F"]
 		attribute "occupancyStatus", "enum", ["unoccupy", "occupy"]
@@ -254,6 +256,7 @@ def parse(String description) {
 	def cluster = zigbee.parse(description)
 	traceEvent(settings.logFilter,"parse>Cluster : $cluster", settings.trace)
 	def map = [:]
+    def map2 = [:]
 	if (description?.startsWith("read attr -")) {
 		def descMap = parseDescriptionAsMap(description)
 		traceEvent(settings.logFilter,"parse>Desc Map: $descMap", settings.trace)
@@ -266,8 +269,15 @@ def parse(String description) {
 			map.value = getHeatingDemand(descMap.value)			
 			def operatingState=  (map.value.toInteger() < 10) ? "idle" :"heating"  
 			def isChange = isStateChange(device, "thermostatOperatingState", operatingState)
-			def isDisplayed = isChange        
-			sendEvent(name:"thermostatOperatingState", value: operatingState, displayed: isDisplayed)
+			def isDisplayed = isChange
+            def powerMeter = map.value.toInteger()
+            if(settings.capacity){
+                powerMeter = settings.capacity.toInteger() * map.value.toInteger() / 100
+                map2.name = "power"
+                map2.value = powerMeter
+            }
+            sendEvent(name:"power", value: powerMeter, displayed: true)
+            sendEvent(name:"thermostatOperatingState", value: operatingState, displayed: isDisplayed)
 			traceEvent(settings.logFilter,"parse>HEATING DEMAND: ${map.value}, operatingState=$operatingState", settings.trace)
             
 		} else if (descMap.cluster == "0201" && descMap.attrId == "0012") {
@@ -341,8 +351,14 @@ def parse(String description) {
 		if ((map.name.toLowerCase().contains("temp")) || (map.name.toLowerCase().contains("setpoint"))) {
 			map.scale=scale  
 		}
-		result = createEvent(map)
-//		sendEvent(map)        
+        def evt1 = createEvent(map)
+        if(map2){
+            def evt2 = createEvent(map2)
+            result = [evt1, evt2]
+        } else {
+            result = evt1
+        }
+		// sendEvent(map)        
         
 	}
 	traceEvent(settings.logFilter,"Parse returned $map", settings.trace)
